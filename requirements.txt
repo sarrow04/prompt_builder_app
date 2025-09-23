@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+scikit-learn
+lightgbm
+matplotlib
+japanize-matplotlib
+seaborn
+shap
+holidays
+plotly
