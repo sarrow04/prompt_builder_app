@@ -4,7 +4,6 @@ numpy
 scikit-learn
 lightgbm
 matplotlib
-japanize-matplotlib
 
 
 
