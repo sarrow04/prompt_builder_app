@@ -8,5 +8,5 @@ japanize-matplotlib
 seaborn
 shap
 holidays
-plotly
+
 
