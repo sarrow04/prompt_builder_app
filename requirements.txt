@@ -5,7 +5,7 @@ scikit-learn
 lightgbm
 matplotlib
 japanize-matplotlib
-seaborn
+
 
 
 
