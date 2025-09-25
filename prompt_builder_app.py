@@ -99,9 +99,12 @@ def generate_prompt(
     else: # 予測モデルの構築
         model_str = "、".join(models)
         tasks.append(f"- **モデル学習**: `{model_str}` を使って、予測精度が最大になるようにモデルを学習させてください。")
-        if tune_hyperparams:
+        
+        # ✨ FIX: Check if models list is not empty before accessing models[0]
+        if tune_hyperparams and models:
             cv_method = "TimeSeriesSplitを使ったクロスバリデーション" if problem_type == "時系列予測" else "通常のクロスバリデーション(cv=5)"
             tasks.append(f"- **ハイパーパラメータチューニング**: GridSearchCVを使い、`{models[0]}`のモデルの予測精度をさらに向上させてください。({cv_method})")
+        
         if use_ensemble and len(models) > 1:
             tasks.append("- **アンサンブル**: 学習させた複数のモデルの予測値を平均し、アンサンブル予測を行ってください。")
 
@@ -126,6 +129,7 @@ def generate_prompt(
 
     # --- 可視化タスク ---
     graph_tasks = "\n- **可視化**: 以下のグラフを生成し、`save_folder_path`に保存してください。\n"
+    # Ensure SHAP is always included
     if "特徴量の重要度 (SHAP)" not in graphs:
         graphs.insert(0, "特徴量の重要度 (SHAP)")
     for graph in graphs:
@@ -165,6 +169,7 @@ with st.sidebar:
     train_path, test_path, submit_path, single_path = None, None, None, None
     id_col, time_col, ts_features = None, None, None
     use_ensemble = False
+    tune_hyperparams = False
 
     if source_type == "Kaggle形式":
         st.write("Google Drive内のファイルパスを入力してください。")
@@ -207,12 +212,12 @@ with st.sidebar:
     st.subheader("6. モデル戦略を選択")
     default_models = ["LightGBM"] if problem_type == "時系列予測" else ["LightGBM", "ロジスティック回帰/線形回帰"]
     models = st.multiselect("使用したいモデル", ["LightGBM", "ロジスティック回帰/線形回帰", "ランダムフォレスト", "XGBoost", "ARIMA", "Prophet"], default=default_models)
+    
     if problem_type != "時系列予測" and analysis_goal == "予測モデルの構築":
         use_ensemble = st.checkbox("アンサンブル学習を行う", value=True)
+        
     if analysis_goal == "予測モデルの構築":
         tune_hyperparams = st.checkbox("ハイパーパラメータチューニングを行う", value=True)
-    else:
-        tune_hyperparams = False
         
     st.subheader("7. 分析と可視化の項目を選択")
     include_corr = st.checkbox("相関ヒートマップの作成", value=True)
