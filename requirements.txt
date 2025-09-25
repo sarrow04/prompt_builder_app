@@ -7,4 +7,3 @@ tabulate
 plotly
 japanize-matplotlib
 lightgbm
-shap
