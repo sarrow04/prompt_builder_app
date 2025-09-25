@@ -6,7 +6,7 @@ lightgbm
 matplotlib
 japanize-matplotlib
 seaborn
-shap
+
 
 
 
