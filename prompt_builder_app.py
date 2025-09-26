@@ -3,7 +3,7 @@ import pandas as pd
 from io import StringIO
 
 # --------------------------------------------------------------------------
-# プロンプト生成ロジック部
+# プロンプト生成ロジック部 (✨✨ この部分を改善 ✨✨)
 # --------------------------------------------------------------------------
 def generate_prompt(
     problem_type, source_type, analysis_goal, data_context,
@@ -11,7 +11,9 @@ def generate_prompt(
     target_col, id_col, time_col,
     models, use_ensemble, tune_hyperparams,
     ts_features, include_corr, include_scaling, graphs,
-    save_dir_path
+    save_dir_path,
+    # --- 改善点: 特徴量選択用の引数を追加 ---
+    use_feature_selection, n_top_features
     ):
     """ユーザーの選択に基づいてAIへのプロンプトを生成する関数"""
     prompt = [
@@ -68,10 +70,8 @@ def generate_prompt(
     ])
 
     tasks = [f"- **保存先ディレクトリの作成**: `os.makedirs(save_folder_path, exist_ok=True)` を実行してください。"]
-    
     if source_type == "Kaggle形式":
         tasks.append("- **データ結合**: `df_train`と`df_test`を一度結合し、共通の前処理を実装してください。処理後、再度`train`と`test`に分割する流れでお願いします。")
-
     if problem_type == "時系列予測":
         tasks.append(f"- **時系列データの前処理**: `{time_col}`列をdatetime型に変換してください。")
         if ts_features:
@@ -80,24 +80,21 @@ def generate_prompt(
              tasks.append("- **モデル特化の前処理**: ARIMAのために系列の定常性チェック（ADF検定など）と、必要であれば差分処理を実装してください。Prophetのためには、カラム名を`ds`と`y`に変更する処理も加えてください。")
     else:
         tasks.append("- **カテゴリカル変数の処理**: **各カテゴリカル変数のユニーク数を調査**し、その数に応じてワンホットエンコーディングかラベルエンコーディングを適切に使い分けてください。")
-
     tasks.append("- **欠損値処理**: 欠損値の有無を確認し、もし存在すれば適切な方法（例: 平均値、中央値、最頻値などで補完）で処理してください。")
     if include_scaling:
         tasks.append("- **特徴量スケーリング**: `StandardScaler`などを用いて、数値特徴量のスケールを揃える処理を実装してください。")
     if include_corr:
         tasks.append("- **相関分析**: 前処理後の特徴量間の相関行列を計算し、ヒートマップで可視化してください。")
-
     prompt.append("\n".join(tasks))
 
     prompt.extend([
         "\n# ==================================",
-        f"# Step 4: {analysis_goal}のためのモデル構築と評価",
+        f"# Step 4: {analysis_goal}のためのモデル構築と評価 (初回)",
         "# ==================================",
         "### 実行してほしいタスク:",
     ])
     
-    tasks = [] 
-
+    tasks = []
     if analysis_goal == "要因分析":
         tasks.append("- **モデル学習**: **解釈性の高い**モデル（ロジスティック回帰/線形回帰, 決定木など）を優先して使用してください。")
         tasks.append(f"- **要因分析**: モデルの係数やSHAP値を使い、「どの特徴量が `{target_col}` に正または負の影響を与えているか」を分析・考察してください。")
@@ -122,13 +119,29 @@ def generate_prompt(
     if "特徴量の重要度 (SHAP)" not in graphs and not any(m in ["ARIMA", "Prophet"] for m in models):
         graphs.insert(0, "特徴量の重要度 (SHAP)")
     tasks.append(f"\n- **可視化**: 以下のグラフを生成し、`save_folder_path`に保存してください。\n  - " + "\n  - ".join(graphs))
-    
-    if source_type == "Kaggle形式":
-        tasks.append(f"- **提出ファイルの作成**: `sample_submission.csv`の形式に合わせて、テストデータの予測結果を`os.path.join(save_folder_path, 'submission.csv')`として出力してください。ID列は`{id_col}`です。")
-    elif problem_type == "時系列予測":
-        tasks.append("- **未来予測**: 学習したモデルを使い、未来の予測値を算出し、実績値と合わせてグラフにプロットしてください。")
-
     prompt.append("\n".join(tasks))
+
+    # --- 改善点: 特徴量選択がONの場合、新しいステップを追加 ---
+    if use_feature_selection and 'LightGBM' in models:
+        prompt.extend([
+            "\n# ==================================",
+            "# Step 5: モデルベースの特徴量選択と再構築",
+            "# ==================================",
+            "### 実行してほしいタスク:",
+            f"- **特徴量選択**: Step 4で学習したLightGBMモデルの `feature_importances_` を利用して、重要度の高い上位 **{n_top_features}個** の特徴量を選択してください。",
+            "- **モデル再構築**: 選択した特徴量のみを使用して、再度LightGBMモデルを学習させてください。ハイパーパラメータはStep 4でチューニングした最適値を使用してください。",
+            "- **再評価**: 新しいモデルを同じ検証データで評価し、Step 4の評価指標と比較してスコアが改善したか報告してください。",
+        ])
+        # 提出ファイル作成の指示をこちらに移動
+        if source_type == "Kaggle形式":
+             prompt.append(f"- **提出ファイルの作成**: **スコアが改善した場合**、再構築したモデルを使用してテストデータの予測を行い、`submission_selected.csv`として提出ファイルを作成してください。改善しなかった場合は、Step 4のモデルを使用してください。")
+    else:
+        # 特徴量選択がない場合の提出ファイル作成
+        if source_type == "Kaggle形式":
+            prompt.append(f"\n- **提出ファイルの作成**: `sample_submission.csv`の形式に合わせて、テストデータの予測結果を`os.path.join(save_folder_path, 'submission.csv')`として出力してください。ID列は`{id_col}`です。")
+        elif problem_type == "時系列予測":
+            prompt.append("\n- **未来予測**: 学習したモデルを使い、未来の予測値を算出し、実績値と合わせてグラフにプロットしてください。")
+    
     prompt.append("\n---\n以上の内容で、Pythonコードを生成してください。")
     return "\n".join(prompt)
 
@@ -165,11 +178,7 @@ with st.sidebar:
     with st.expander("3. データの詳細", expanded=True):
         target_col_default = "y" if problem_type == "時系列予測" else "target"
         target_col = st.text_input("目的変数の列名", target_col_default, key="target_col")
-
-        id_col = ""
-        if source_type == "Kaggle形式":
-            id_col = st.text_input("ID/識別子の列名", "id", key="id_col")
-
+        id_col = st.text_input("ID/識別子の列名", "id", key="id_col") if source_type == "Kaggle形式" else ""
         time_col, ts_features = "", []
         if problem_type == "時系列予測":
             time_col = st.text_input("時系列カラム（日付/時刻）の列名", "datetime", key="time_col")
@@ -181,7 +190,7 @@ with st.sidebar:
             )
 
     with st.expander("4. データ概要", expanded=False):
-        st.info("分析対象のCSV（学習データなど）をアップロードすると、以下の欄に概要が自動入力されます。")
+        st.info("分析対象のCSVをアップロードすると、概要が自動入力されます。")
         uploaded_file = st.file_uploader("CSVをアップロードして概要を自動生成", type=['csv'], key="uploader")
         if uploaded_file:
             try:
@@ -199,27 +208,29 @@ with st.sidebar:
         default_models = ["LightGBM"] if problem_type == "時系列予測" else ["LightGBM", "ロジスティック回帰/線形回帰"]
         models = st.multiselect("使用したいモデル", ["LightGBM", "ロジスティック回帰/線形回帰", "ランダムフォレスト", "XGBoost", "ARIMA", "Prophet"], default=default_models, key="models")
 
-        tune_hyperparams, use_ensemble = False, False
+        tune_hyperparams, use_ensemble, use_feature_selection = False, False, False
+        n_top_features = 50
         if analysis_goal == "予測モデルの構築":
             tune_hyperparams = st.checkbox("ハイパーパラメータチューニングを行う", True, key="tuning")
             if problem_type != "時系列予測" and len(models) > 1:
                 use_ensemble = st.checkbox("アンサンブル学習を行う", True, key="ensemble")
-        
+            
+            # --- 改善点: 特徴量選択のUIを追加 ---
+            if 'LightGBM' in models:
+                use_feature_selection = st.checkbox("モデルベースの特徴量選択を行う", True, key="feature_selection", help="初回のモデル学習後、重要度の高い特徴量のみを使い再学習して精度向上を狙います。")
+                if use_feature_selection:
+                    n_top_features = st.number_input("選択する上位特徴量の数", min_value=10, max_value=200, value=50, step=10, key="n_top_features")
+
         include_scaling = st.checkbox("特徴量スケーリングを行う", True, key="scaling", help="線形回帰など、特徴量のスケールが影響するモデルで特に有効です。")
         include_corr = st.checkbox("相関ヒートマップを作成", True, key="corr")
 
     with st.expander("6. 可視化と保存先", expanded=True):
         graph_options = []
-        if problem_type == "分類":
-            graph_options = ["目的変数の分布 (カウントプロット)", "混同行列"]
-        elif problem_type == "回帰":
-            graph_options = ["目的変数の分布 (ヒストグラム)", "実績値 vs 予測値プロット"]
-        else:
-            graph_options = ["時系列グラフのプロット", "時系列分解図 (トレンド, 季節性)", "ACF/PACFプロット"]
-        
+        if problem_type == "分類": graph_options = ["目的変数の分布 (カウントプロット)", "混同行列"]
+        elif problem_type == "回帰": graph_options = ["目的変数の分布 (ヒストグラム)", "実績値 vs 予測値プロット"]
+        else: graph_options = ["時系列グラフのプロット", "時系列分解図 (トレンド, 季節性)", "ACF/PACFプロット"]
         if not any(m in ["ARIMA", "Prophet"] for m in models):
              graph_options.append("特徴量の重要度 (SHAP)")
-        
         graphs = st.multiselect("作成したいグラフの種類", graph_options, default=graph_options, key="graphs")
         save_dir_path = st.text_input("保存先フォルダ", "/content/drive/MyDrive/results/", key="save_path")
 
@@ -227,7 +238,6 @@ with st.sidebar:
 st.header("✅ 生成されたプロンプト")
 st.info("以下のテキストをコピーして、AIアシスタントに貼り付けてください。")
 
-# --- プロンプト生成の実行 ---
 if all([target_col, data_context]) and models:
     generated_prompt_text = generate_prompt(
         problem_type, source_type, analysis_goal, data_context,
@@ -235,7 +245,9 @@ if all([target_col, data_context]) and models:
         target_col, id_col, time_col,
         models, use_ensemble, tune_hyperparams,
         ts_features, include_corr, include_scaling, graphs,
-        save_dir_path
+        save_dir_path,
+        # --- 改善点: 特徴量選択の引数を渡す ---
+        use_feature_selection, n_top_features
     )
     st.text_area("", generated_prompt_text, height=600, label_visibility="collapsed")
 else:
