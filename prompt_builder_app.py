@@ -42,14 +42,12 @@ def generate_prompt(
     else:
         prompt.append(f"file_path = '{single_path}'")
     prompt.append(f"save_folder_path = '{save_dir_path}'")
-
     prompt.append("\n### データの読み込み")
     if source_type == "Kaggle形式":
         prompt.append("df_train = pd.read_csv(train_data_path)")
         prompt.append("df_test = pd.read_csv(test_data_path)")
     else:
         prompt.append("df = pd.read_csv(file_path)")
-
     prompt.extend([
         "\n# ==================================",
         "# Step 2: データ概要の把握",
@@ -61,16 +59,13 @@ def generate_prompt(
         "--- ここまで ---",
         f"\n今回の分析の目的変数は `{target_col}` です。"
     ])
-
     prompt.extend([
         "\n# ==================================",
         f"# Step 3: {analysis_goal}のための特徴量エンジニアリングと前処理",
         "# ==================================",
         "### 実行してほしいタスク:",
     ])
-
     tasks = [f"- **保存先ディレクトリの作成**: `os.makedirs(save_folder_path, exist_ok=True)` を実行してください。"]
-    # ... (Step 3 のタスク生成ロジックは変更なし) ...
     if source_type == "Kaggle形式":
         tasks.append("- **データ結合**: `df_train`と`df_test`を一度結合し、共通の前処理を実装してください。処理後、再度`train`と`test`に分割する流れでお願いします。")
     if problem_type == "時系列予測":
@@ -96,17 +91,17 @@ def generate_prompt(
     ])
     
     tasks = []
-    # ... (モデル学習のタスク生成ロジックは変更なし) ...
-    if analysis_goal == "要因分析":
-        tasks.append("- **モデル学習**: **解釈性の高い**モデル（ロジスティック回帰/線形回帰, 決定木など）を優先して使用してください。")
-        tasks.append(f"- **要因分析**: モデルの係数やSHAP値を使い、「どの特徴量が `{target_col}` に正または負の影響を与えているか」を分析・考察してください。")
-    else:
-        tasks.append(f"- **モデル学習**: `{', '.join(models)}` を使って、予測精度が最大になるようにモデルを学習させてください。")
-        if tune_hyperparams and models and not any(m in ["ARIMA", "Prophet"] for m in models):
-            cv_method = "TimeSeriesSplitを使ったクロスバリデーション" if problem_type == "時系列予測" else "通常のクロスバリデーション(cv=5)"
-            tasks.append(f"- **ハイパーパラメータチューニング**: GridSearchCVを使い、`{models[0]}`のモデルの予測精度をさらに向上させてください。({cv_method})")
-        if use_ensemble and len(models) > 1:
-            tasks.append("- **アンサンブル**: 学習させた複数のモデルの予測値を平均し、アンサンブル予測を行ってください。")
+    tasks.append(f"- **モデル学習**: `{', '.join(models)}` を使って、予測精度が最大になるようにモデルを学習させてください。")
+    
+    ### --- 改善点: 予測式の表示タスクを追加 --- ###
+    if 'ロジスティック回帰/線形回帰' in models:
+        tasks.append("- **予測式の表示**: 線形回帰またはロジスティック回帰モデルが学習された場合、そのモデルの係数（`coef_`）と切片（`intercept_`）を表示し、予測式を人間が理解できる形で示してください。")
+
+    if tune_hyperparams and models and not any(m in ["ARIMA", "Prophet"] for m in models):
+        cv_method = "TimeSeriesSplitを使ったクロスバリデーション" if problem_type == "時系列予測" else "通常のクロスバリデーション(cv=5)"
+        tasks.append(f"- **ハイパーパラメータチューニング**: GridSearchCVを使い、`{models[0]}`のモデルの予測精度をさらに向上させてください。({cv_method})")
+    if use_ensemble and len(models) > 1:
+        tasks.append("- **アンサンブル**: 学習させた複数のモデルの予測値を平均し、アンサンブル予測を行ってください。")
 
     evaluation_items = []
     if problem_type == "分類":
@@ -117,19 +112,25 @@ def generate_prompt(
         evaluation_items = ["RMSE (Root Mean Squared Error)", "MAE (Mean Absolute Error)", "MAPE (Mean Absolute Percentage Error)"]
     if evaluation_items:
         tasks.append(f"\n- **モデル評価**: テストデータ（または検証データ）に対して、以下の指標を計算し、結果を報告してください。\n  - " + "\n  - ".join(evaluation_items))
-
-        ### --- 改善点: 評価指標の解説タスクを追加 --- ###
         tasks.append("- **評価指標の簡単な解説**: 計算された各評価指標について、その値が一般的に「高い」のか「低い」のか、それが何を意味するのかを初心者にも分かるように簡単に解説してください。")
 
     tasks.append(f"\n- **可視化**: 以下のグラフを生成し、`save_folder_path`に保存してください。\n  - " + "\n  - ".join(graphs))
-
-    ### --- 改善点: 特徴量ランキングのリストアップタスクを追加 --- ###
     if any("SHAP" in g for g in graphs):
         tasks.append("- **重要度の高い・低い特徴量のリストアップ**: SHAPの分析結果に基づき、最も重要度が高かった特徴量トップ5と、最も重要度が低かった（モデルがあまり利用しなかった）特徴量ワースト5をリストアップしてください。")
     
     prompt.append("\n".join(tasks))
 
-    # ... (Step 5 と提出ファイル作成のロジックは変更なし) ...
+    # 提出ファイル作成の指示を生成する関数
+    def create_submission_tasks(is_kaggle, problem, id_col_name):
+        submission_tasks = []
+        if is_kaggle:
+             ### --- 改善点: 予測値の表示と要約タスクを追加 --- ###
+            submission_tasks.append("- **予測結果の表示と要約**: 最終的な予測結果（テストデータに対する予測値）の先頭5行と、その基本統計量（平均、標準偏差、最小値、最大値など）を表示してください。")
+            submission_tasks.append(f"- **提出ファイルの作成**: `sample_submission.csv`の形式に合わせて、テストデータの予測結果を`os.path.join(save_folder_path, 'submission.csv')`として出力してください。ID列は`{id_col_name}`です。")
+        elif problem == "時系列予測":
+            submission_tasks.append("\n- **未来予測**: 学習したモデルを使い、未来の予測値を算出し、実績値と合わせてグラフにプロットしてください。")
+        return submission_tasks
+
     if use_feature_selection and 'LightGBM' in models:
         prompt.extend([
             "\n# ==================================",
@@ -140,19 +141,23 @@ def generate_prompt(
             "- **モデル再構築**: 選択した特徴量のみを使用して、再度LightGBMモデルを学習させてください。ハイパーパラメータはStep 4でチューニングした最適値を使用してください。",
             "- **再評価**: 新しいモデルを同じ検証データで評価し、Step 4の評価指標と比較してスコアが改善したか報告してください。",
         ])
-        if source_type == "Kaggle形式":
-             prompt.append(f"- **提出ファイルの作成**: **スコアが改善した場合**、再構築したモデルを使用してテストデータの予測を行い、`submission_selected.csv`として提出ファイルを作成してください。改善しなかった場合は、Step 4のモデルを使用してください。")
+        # 提出ファイル作成タスクをここに追加
+        prompt.extend(create_submission_tasks(source_type == "Kaggle形式", problem_type, id_col))
     else:
-        if source_type == "Kaggle形式":
-            prompt.append(f"\n- **提出ファイルの作成**: `sample_submission.csv`の形式に合わせて、テストデータの予測結果を`os.path.join(save_folder_path, 'submission.csv')`として出力してください。ID列は`{id_col}`です。")
-        elif problem_type == "時系列予測":
-            prompt.append("\n- **未来予測**: 学習したモデルを使い、未来の予測値を算出し、実績値と合わせてグラフにプロットしてください。")
+        # 特徴量選択がない場合は、独立したステップとして提出ファイル作成を追加
+        submission_tasks = create_submission_tasks(source_type == "Kaggle形式", problem_type, id_col)
+        if submission_tasks:
+            prompt.append("\n# ==================================")
+            prompt.append("# Step 5: 最終予測とファイルの提出")
+            prompt.append("# ==================================")
+            prompt.extend(submission_tasks)
     
     prompt.append("\n---\n以上の内容で、Pythonコードを生成してください。")
     return "\n".join(prompt)
 
+
 # --------------------------------------------------------------------------
-# Streamlit UI部
+# Streamlit UI部 (UIの変更はありません)
 # --------------------------------------------------------------------------
 st.set_page_config(page_title="🤖 AIプロンプトビルダー", layout="wide")
 st.title("🤖 AIプロンプトビルダー for Data Analysis")
@@ -168,8 +173,6 @@ with st.sidebar:
     with st.expander("1. 分析の目的", expanded=True):
         analysis_goal = st.radio("主な目的は？", ["予測モデルの構築", "要因分析"], horizontal=True, key="analysis_goal")
         problem_type = st.radio("問題の種類は？", ["分類", "回帰", "時系列予測"], horizontal=True, key="problem_type")
-
-    # ... (UIのExpander 2, 3, 4 は変更なし) ...
     with st.expander("2. データソース", expanded=True):
         source_type = st.radio("データの形式は？", ["単一ファイル", "Kaggle形式"], horizontal=True, key="source_type")
         st.caption("Google Drive内のファイルパスを入力してください。")
@@ -208,11 +211,9 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"ファイル読み込みエラー: {e}")
         data_context = st.text_area("データ概要（自動入力）", st.session_state.data_context, height=300, key="data_context")
-
     with st.expander("5. モデルと分析手法", expanded=True):
         default_models = ["LightGBM"] if problem_type == "時系列予測" else ["LightGBM", "ロジスティック回帰/線形回帰"]
         models = st.multiselect("使用したいモデル", ["LightGBM", "ロジスティック回帰/線形回帰", "ランダムフォレスト", "XGBoost", "ARIMA", "Prophet"], default=default_models, key="models")
-
         tune_hyperparams, use_ensemble, use_feature_selection = False, False, False
         n_top_features = 50
         if analysis_goal == "予測モデルの構築":
@@ -223,23 +224,17 @@ with st.sidebar:
                 use_feature_selection = st.checkbox("モデルベースの特徴量選択を行う", True, key="feature_selection", help="初回のモデル学習後、重要度の高い特徴量のみを使い再学習して精度向上を狙います。")
                 if use_feature_selection:
                     n_top_features = st.number_input("選択する上位特徴量の数", min_value=10, max_value=200, value=50, step=10, key="n_top_features")
-
         include_scaling = st.checkbox("特徴量スケーリングを行う", True, key="scaling", help="線形回帰など、特徴量のスケールが影響するモデルで特に有効です。")
         include_corr = st.checkbox("相関ヒートマップを作成", True, key="corr")
-
     with st.expander("6. 可視化と保存先", expanded=True):
         graph_options = []
         if problem_type == "分類": graph_options = ["目的変数の分布 (カウントプロット)", "混同行列"]
         elif problem_type == "回帰": graph_options = ["目的変数の分布 (ヒストグラム)", "実績値 vs 予測値プロット"]
         else: graph_options = ["時系列グラフのプロット", "時系列分解図 (トレンド, 季節性)", "ACF/PACFプロット"]
-        
-        ### --- 改善点: SHAPの選択肢を具体的に --- ###
         if not any(m in ["ARIMA", "Prophet"] for m in models):
              graph_options.extend(["SHAP 重要度プロット (Bar)", "SHAP Beeswarmプロット"])
-        
         graphs = st.multiselect("作成したいグラフの種類", graph_options, default=graph_options, key="graphs")
         save_dir_path = st.text_input("保存先フォルダ", "/content/drive/MyDrive/results/", key="save_path")
-
 
 # --- メイン画面 ---
 st.header("✅ 生成されたプロンプト")
