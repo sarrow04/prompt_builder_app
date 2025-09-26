@@ -12,7 +12,6 @@ def generate_prompt(
     models, use_ensemble, tune_hyperparams,
     ts_features, include_corr, include_scaling, graphs,
     save_dir_path,
-    # --- 改善点: 特徴量選択用の引数を追加 ---
     use_feature_selection, n_top_features
     ):
     """ユーザーの選択に基づいてAIへのプロンプトを生成する関数"""
@@ -35,6 +34,7 @@ def generate_prompt(
         "\n### ファイルパスと保存先の設定",
     ]
 
+    # ... (ファイルパス設定、データ読み込み、概要把握のロジックは変更なし) ...
     if source_type == "Kaggle形式":
         prompt.append(f"train_data_path = '{train_path}'")
         prompt.append(f"test_data_path = '{test_path}'")
@@ -70,6 +70,7 @@ def generate_prompt(
     ])
 
     tasks = [f"- **保存先ディレクトリの作成**: `os.makedirs(save_folder_path, exist_ok=True)` を実行してください。"]
+    # ... (Step 3 のタスク生成ロジックは変更なし) ...
     if source_type == "Kaggle形式":
         tasks.append("- **データ結合**: `df_train`と`df_test`を一度結合し、共通の前処理を実装してください。処理後、再度`train`と`test`に分割する流れでお願いします。")
     if problem_type == "時系列予測":
@@ -95,6 +96,7 @@ def generate_prompt(
     ])
     
     tasks = []
+    # ... (モデル学習のタスク生成ロジックは変更なし) ...
     if analysis_goal == "要因分析":
         tasks.append("- **モデル学習**: **解釈性の高い**モデル（ロジスティック回帰/線形回帰, 決定木など）を優先して使用してください。")
         tasks.append(f"- **要因分析**: モデルの係数やSHAP値を使い、「どの特徴量が `{target_col}` に正または負の影響を与えているか」を分析・考察してください。")
@@ -116,12 +118,18 @@ def generate_prompt(
     if evaluation_items:
         tasks.append(f"\n- **モデル評価**: テストデータ（または検証データ）に対して、以下の指標を計算し、結果を報告してください。\n  - " + "\n  - ".join(evaluation_items))
 
-    if "特徴量の重要度 (SHAP)" not in graphs and not any(m in ["ARIMA", "Prophet"] for m in models):
-        graphs.insert(0, "特徴量の重要度 (SHAP)")
+        ### --- 改善点: 評価指標の解説タスクを追加 --- ###
+        tasks.append("- **評価指標の簡単な解説**: 計算された各評価指標について、その値が一般的に「高い」のか「低い」のか、それが何を意味するのかを初心者にも分かるように簡単に解説してください。")
+
     tasks.append(f"\n- **可視化**: 以下のグラフを生成し、`save_folder_path`に保存してください。\n  - " + "\n  - ".join(graphs))
+
+    ### --- 改善点: 特徴量ランキングのリストアップタスクを追加 --- ###
+    if any("SHAP" in g for g in graphs):
+        tasks.append("- **重要度の高い・低い特徴量のリストアップ**: SHAPの分析結果に基づき、最も重要度が高かった特徴量トップ5と、最も重要度が低かった（モデルがあまり利用しなかった）特徴量ワースト5をリストアップしてください。")
+    
     prompt.append("\n".join(tasks))
 
-    # --- 改善点: 特徴量選択がONの場合、新しいステップを追加 ---
+    # ... (Step 5 と提出ファイル作成のロジックは変更なし) ...
     if use_feature_selection and 'LightGBM' in models:
         prompt.extend([
             "\n# ==================================",
@@ -132,11 +140,9 @@ def generate_prompt(
             "- **モデル再構築**: 選択した特徴量のみを使用して、再度LightGBMモデルを学習させてください。ハイパーパラメータはStep 4でチューニングした最適値を使用してください。",
             "- **再評価**: 新しいモデルを同じ検証データで評価し、Step 4の評価指標と比較してスコアが改善したか報告してください。",
         ])
-        # 提出ファイル作成の指示をこちらに移動
         if source_type == "Kaggle形式":
              prompt.append(f"- **提出ファイルの作成**: **スコアが改善した場合**、再構築したモデルを使用してテストデータの予測を行い、`submission_selected.csv`として提出ファイルを作成してください。改善しなかった場合は、Step 4のモデルを使用してください。")
     else:
-        # 特徴量選択がない場合の提出ファイル作成
         if source_type == "Kaggle形式":
             prompt.append(f"\n- **提出ファイルの作成**: `sample_submission.csv`の形式に合わせて、テストデータの予測結果を`os.path.join(save_folder_path, 'submission.csv')`として出力してください。ID列は`{id_col}`です。")
         elif problem_type == "時系列予測":
@@ -163,6 +169,7 @@ with st.sidebar:
         analysis_goal = st.radio("主な目的は？", ["予測モデルの構築", "要因分析"], horizontal=True, key="analysis_goal")
         problem_type = st.radio("問題の種類は？", ["分類", "回帰", "時系列予測"], horizontal=True, key="problem_type")
 
+    # ... (UIのExpander 2, 3, 4 は変更なし) ...
     with st.expander("2. データソース", expanded=True):
         source_type = st.radio("データの形式は？", ["単一ファイル", "Kaggle形式"], horizontal=True, key="source_type")
         st.caption("Google Drive内のファイルパスを入力してください。")
@@ -174,7 +181,6 @@ with st.sidebar:
         else:
             single_path = st.text_input("CSVファイルのパス", "/content/drive/MyDrive/data/my_data.csv")
             train_path, test_path, submit_path = "", "", ""
-
     with st.expander("3. データの詳細", expanded=True):
         target_col_default = "y" if problem_type == "時系列予測" else "target"
         target_col = st.text_input("目的変数の列名", target_col_default, key="target_col")
@@ -188,7 +194,6 @@ with st.sidebar:
                 default=["時間ベースの特徴量 (年, 月, 曜日など)", "ラグ特徴量", "移動平均特徴量"],
                 key="ts_features"
             )
-
     with st.expander("4. データ概要", expanded=False):
         st.info("分析対象のCSVをアップロードすると、概要が自動入力されます。")
         uploaded_file = st.file_uploader("CSVをアップロードして概要を自動生成", type=['csv'], key="uploader")
@@ -214,8 +219,6 @@ with st.sidebar:
             tune_hyperparams = st.checkbox("ハイパーパラメータチューニングを行う", True, key="tuning")
             if problem_type != "時系列予測" and len(models) > 1:
                 use_ensemble = st.checkbox("アンサンブル学習を行う", True, key="ensemble")
-            
-            # --- 改善点: 特徴量選択のUIを追加 ---
             if 'LightGBM' in models:
                 use_feature_selection = st.checkbox("モデルベースの特徴量選択を行う", True, key="feature_selection", help="初回のモデル学習後、重要度の高い特徴量のみを使い再学習して精度向上を狙います。")
                 if use_feature_selection:
@@ -229,10 +232,14 @@ with st.sidebar:
         if problem_type == "分類": graph_options = ["目的変数の分布 (カウントプロット)", "混同行列"]
         elif problem_type == "回帰": graph_options = ["目的変数の分布 (ヒストグラム)", "実績値 vs 予測値プロット"]
         else: graph_options = ["時系列グラフのプロット", "時系列分解図 (トレンド, 季節性)", "ACF/PACFプロット"]
+        
+        ### --- 改善点: SHAPの選択肢を具体的に --- ###
         if not any(m in ["ARIMA", "Prophet"] for m in models):
-             graph_options.append("特徴量の重要度 (SHAP)")
+             graph_options.extend(["SHAP 重要度プロット (Bar)", "SHAP Beeswarmプロット"])
+        
         graphs = st.multiselect("作成したいグラフの種類", graph_options, default=graph_options, key="graphs")
         save_dir_path = st.text_input("保存先フォルダ", "/content/drive/MyDrive/results/", key="save_path")
+
 
 # --- メイン画面 ---
 st.header("✅ 生成されたプロンプト")
@@ -246,7 +253,6 @@ if all([target_col, data_context]) and models:
         models, use_ensemble, tune_hyperparams,
         ts_features, include_corr, include_scaling, graphs,
         save_dir_path,
-        # --- 改善点: 特徴量選択の引数を渡す ---
         use_feature_selection, n_top_features
     )
     st.text_area("", generated_prompt_text, height=600, label_visibility="collapsed")
